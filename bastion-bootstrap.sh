@@ -158,7 +158,7 @@ install_paru() {
 
     # Build and install (--noconfirm skips prompts; --needed avoids reinstall)
     dryrun "makepkg -si --noconfirm in $paru_src" || \
-        as_build_user bash -c "cd '$paru_src' && makepkg -si --noconfirm"
+        as_build_user bash -c "cd '$paru_src' && MAKEFLAGS='-j$(nproc)' makepkg -si --noconfirm --needed"
 
     # Verify
     if ! command -v paru &>/dev/null; then
@@ -192,7 +192,10 @@ install_aur_packages() {
     local aur_pkgs=("$@")
     log "Installing AUR packages: ${aur_pkgs[*]}"
     dryrun "paru -S --needed --noconfirm ${aur_pkgs[*]}" || \
-        as_build_user paru -S --needed --noconfirm "${aur_pkgs[@]}"
+        as_build_user paru -S --needed --noconfirm \
+            --skippgpcheck \
+            --mflags "--noconfirm --needed" \
+            "${aur_pkgs[@]}"
 }
 
 # ── Cleanup ephemeral build user ─────────────────────────────────────────────
