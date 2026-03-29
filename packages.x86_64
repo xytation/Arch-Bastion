@@ -1,0 +1,107 @@
+# =============================================================================
+# packages.x86_64 — Bastion ISO package list
+# Based on archiso releng profile with security additions
+# =============================================================================
+
+# ── Base system ───────────────────────────────────────────────────────────────
+base
+linux
+linux-firmware
+linux-headers
+mkinitcpio
+mkinitcpio-archiso
+
+# ── Bootloader ────────────────────────────────────────────────────────────────
+grub
+efibootmgr
+syslinux
+memtest86+
+memtest86+-efi
+
+# ── Filesystem tools ──────────────────────────────────────────────────────────
+btrfs-progs
+dosfstools
+e2fsprogs
+exfatprogs
+f2fs-tools
+gptfdisk
+lvm2
+mdadm
+parted
+squashfs-tools
+xfsprogs
+
+# ── Networking ────────────────────────────────────────────────────────────────
+iproute2
+iputils
+net-tools
+nmap
+openssh
+openssl
+ufw
+bind              # dig
+curl
+wget
+rsync
+socat
+traceroute
+whois
+
+# ── Security tooling ──────────────────────────────────────────────────────────
+apparmor
+audit
+clamav
+fail2ban
+lynis
+osquery
+rkhunter
+
+# ── Crypto / PKI ──────────────────────────────────────────────────────────────
+gnupg
+libsecret
+p11-kit
+
+# ── System utilities ──────────────────────────────────────────────────────────
+acl
+attr
+bash
+bash-completion
+chrony
+coreutils
+diffutils
+findutils
+gawk
+grep
+gzip
+htop
+less
+lsof
+man-db
+nano
+procps-ng
+psmisc
+sed
+shadow
+strace
+sudo
+systemd
+tar
+tcpdump
+tmux
+tree
+util-linux
+vim
+which
+xz
+zstd
+
+# ── Hardware ──────────────────────────────────────────────────────────────────
+dmidecode
+hdparm
+pciutils
+usbutils
+smartmontools
+
+# ── Build tools (for AUR build on first boot) ─────────────────────────────────
+base-devel
+git

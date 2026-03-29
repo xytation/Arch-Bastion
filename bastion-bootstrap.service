@@ -1,0 +1,17 @@
+[Unit]
+Description=Bastion Security Bootstrap (First Boot)
+Documentation=file:///usr/local/bin/bastion-bootstrap.sh
+After=network-online.target multi-user.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/bastion/.bootstrap-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bastion-bootstrap.sh --skip-updates
+ExecStartPost=/bin/bash -c "mkdir -p /var/lib/bastion && touch /var/lib/bastion/.bootstrap-complete"
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
