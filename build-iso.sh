@@ -158,7 +158,9 @@ die()  { echo "[✗] $*"; exit 1; }
 
 TARGET_DISK=""
 HOSTNAME="bastion"
-USE_LUKS=false
+ADMIN_USER=""
+ADMIN_PASS=""
+USE_LUKS=true
 NO_SWAP=false
 TIMEZONE="UTC"
 LOCALE="en_US.UTF-8"
@@ -167,19 +169,21 @@ SWAP_SIZE="2G"
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --disk)       TARGET_DISK="$2"; shift 2 ;;
-        --disk=*)     TARGET_DISK="${1#*=}"; shift ;;
-        --hostname)   HOSTNAME="$2"; shift 2 ;;
-        --hostname=*) HOSTNAME="${1#*=}"; shift ;;
-        --luks)       USE_LUKS=true; shift ;;
-        --no-swap)    NO_SWAP=true; shift ;;
-        --timezone=*) TIMEZONE="${1#*=}"; shift ;;
-        --locale=*)   LOCALE="${1#*=}"; shift ;;
+        --disk)        TARGET_DISK="$2"; shift 2 ;;
+        --disk=*)      TARGET_DISK="${1#*=}"; shift ;;
+        --hostname)    HOSTNAME="$2"; shift 2 ;;
+        --hostname=*)  HOSTNAME="${1#*=}"; shift ;;
+        --user)        ADMIN_USER="$2"; shift 2 ;;
+        --user=*)      ADMIN_USER="${1#*=}"; shift ;;
+        --no-luks)     USE_LUKS=false; shift ;;
+        --no-swap)     NO_SWAP=true; shift ;;
+        --timezone=*)  TIMEZONE="${1#*=}"; shift ;;
+        --locale=*)    LOCALE="${1#*=}"; shift ;;
         *) die "Unknown argument: $1" ;;
     esac
 done
 
-[[ -n "$TARGET_DISK" ]] || die "Usage: $0 --disk /dev/vda [--hostname NAME] [--luks]"
+[[ -n "$TARGET_DISK" ]] || die "Usage: $0 --disk /dev/vda [--hostname NAME] [--user NAME] [--no-luks]"
 [[ -b "$TARGET_DISK" ]] || die "Not a block device: $TARGET_DISK"
 [[ $EUID -eq 0 ]]       || die "Must be root."
 
@@ -191,7 +195,12 @@ echo "════════════════════════�
 echo "  Arch Bastion Installer"
 echo "  Disk:     $TARGET_DISK"
 echo "  Hostname: $HOSTNAME"
-echo "  LUKS:     $USE_LUKS"
+echo "  User:     ${ADMIN_USER:-none}"
+if $USE_LUKS; then
+    echo "  LUKS:     enabled (AES-XTS-512 + Argon2id)"
+else
+    echo "  LUKS:     DISABLED — disk will not be encrypted"
+fi
 echo "  Swap:     $SWAP_DISPLAY"
 echo "═══════════════════════════════════════════════════════"
 echo ""
@@ -208,6 +217,15 @@ while true; do
     if [[ "$ROOT_PASS" == "$ROOT_PASS2" ]]; then break; fi
     echo "  Passwords do not match, try again."
 done
+
+if [[ -n "$ADMIN_USER" ]]; then
+    while true; do
+        read -rsp "  Password for '$ADMIN_USER': " ADMIN_PASS; echo
+        read -rsp "  Confirm password:           " ADMIN_PASS2; echo
+        if [[ "$ADMIN_PASS" == "$ADMIN_PASS2" ]]; then break; fi
+        echo "  Passwords do not match, try again."
+    done
+fi
 
 step "Detecting firmware mode..."
 if [[ -d /sys/firmware/efi ]]; then
@@ -318,17 +336,32 @@ echo "${HOSTNAME}" > /etc/hostname
 printf '127.0.0.1\tlocalhost\n::1\tlocalhost\n127.0.1.1\t${HOSTNAME}.localdomain ${HOSTNAME}\n' > /etc/hosts
 echo "root:${ROOT_PASS}" | chpasswd
 
-cat > /etc/default/grub << 'GRUB'
+if [[ -n "${ADMIN_USER}" ]]; then
+    useradd -m -G wheel,audio,video,optical,storage -s /bin/bash "${ADMIN_USER}"
+    echo "${ADMIN_USER}:${ADMIN_PASS}" | chpasswd
+    echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/wheel
+    chmod 440 /etc/sudoers.d/wheel
+    echo "[+] User ${ADMIN_USER} created and added to wheel."
+fi
+
+CRYPT_PARAM=""
+if ${USE_LUKS}; then
+    ROOT_UUID=$(blkid -s UUID -o value "${ROOT_PART}")
+    CRYPT_PARAM="cryptdevice=UUID=${ROOT_UUID}:cryptroot root=/dev/mapper/cryptroot"
+fi
+
+cat > /etc/default/grub << GRUBEOF
 GRUB_DEFAULT=0
 GRUB_TIMEOUT=3
 GRUB_DISTRIBUTOR="Arch Bastion"
 GRUB_CMDLINE_LINUX_DEFAULT="quiet lsm=landlock,lockdown,yama,apparmor,bpf slab_nomerge pti=on vsyscall=none debugfs=off spectre_v2=on page_alloc.shuffle=1"
-GRUB_CMDLINE_LINUX=""
+GRUB_CMDLINE_LINUX="${CRYPT_PARAM}"
 GRUB_PRELOAD_MODULES="part_gpt part_msdos"
+GRUB_ENABLE_CRYPTODISK=y
 GRUB_TIMEOUT_STYLE=hidden
 GRUB_TERMINAL_INPUT=console
 GRUB_TERMINAL_OUTPUT=console
-GRUB
+GRUBEOF
 
 # Auto-detect BIOS vs UEFI and install GRUB accordingly
 if [[ -d /sys/firmware/efi ]]; then
@@ -339,6 +372,10 @@ else
     grub-install --target=i386-pc "${TARGET_DISK}"
 fi
 grub-mkconfig -o /boot/grub/grub.cfg
+if ${USE_LUKS}; then
+    sed -i 's/\(HOOKS=([^)]*)\)block/\1block encrypt/' /etc/mkinitcpio.conf
+    echo "[+] Added encrypt hook to initramfs"
+fi
 mkinitcpio -P
 
 systemctl enable sshd ufw apparmor fail2ban auditd chronyd NetworkManager
@@ -387,12 +424,25 @@ $NO_SWAP  || swapoff "${SWAP_PART:-}" 2>/dev/null || true
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
-echo "  Installation complete! Add SSH key then reboot."
+echo "  Installation complete!"
 echo ""
+echo "  Add SSH key(s) before rebooting:"
 echo "  mount ${ROOT_DEVICE} /mnt"
+echo ""
+echo "  # root:"
 echo "  mkdir -p /mnt/root/.ssh && chmod 700 /mnt/root/.ssh"
 echo "  echo 'ssh-ed25519 AAAA...' >> /mnt/root/.ssh/authorized_keys"
 echo "  chmod 600 /mnt/root/.ssh/authorized_keys"
+if [[ -n "${ADMIN_USER}" ]]; then
+echo ""
+echo "  # ${ADMIN_USER}:"
+echo "  mkdir -p "/mnt/home/${ADMIN_USER}/.ssh""
+echo "  chmod 700 "/mnt/home/${ADMIN_USER}/.ssh""
+echo "  echo 'ssh-ed25519 AAAA...' >> "/mnt/home/${ADMIN_USER}/.ssh/authorized_keys""
+echo "  chmod 600 "/mnt/home/${ADMIN_USER}/.ssh/authorized_keys""
+echo "  chown -R "${ADMIN_USER}:${ADMIN_USER}" "/mnt/home/${ADMIN_USER}/.ssh""
+fi
+echo ""
 echo "  umount /mnt && reboot"
 echo "═══════════════════════════════════════════════════════"
 INSTALL_SCRIPT
@@ -474,11 +524,14 @@ case "$choice" in
         [[ -b "$DISK" ]] || { echo "  [✗] Not a valid block device: $DISK"; exec bash; }
         read -rp "  Hostname [bastion]: " HN
         HN="${HN:-bastion}"
-        read -rp "  Enable LUKS encryption? [y/N]: " LUKS
+        read -rp "  Admin username (leave blank to skip): " ADMIN
+        USER_FLAG=""
+        [[ -n "$ADMIN" ]] && USER_FLAG="--user $ADMIN"
+        read -rp "  Disable encryption? (NOT recommended) [y/N]: " NOENC
         LUKS_FLAG=""
-        [[ "$LUKS" =~ ^[Yy]$ ]] && LUKS_FLAG="--luks"
+        [[ "$NOENC" =~ ^[Yy]$ ]] && LUKS_FLAG="--no-luks"
         echo ""
-        /usr/local/bin/bastion-install.sh --disk "$DISK" --hostname "$HN" $LUKS_FLAG
+        /usr/local/bin/bastion-install.sh --disk "$DISK" --hostname "$HN" $USER_FLAG $LUKS_FLAG
         ;;
     2) /usr/local/bin/bastion-bootstrap.sh ;;
     *) exec bash ;;
